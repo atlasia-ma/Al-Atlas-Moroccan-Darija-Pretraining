@@ -1,0 +1,54 @@
+# Which pretrained models to finetune
+BASE_MODEL: "Qwen2.5-0.5B"
+# BASE_MODEL: "Falcon3-1B-Base-SFT"
+
+# Dataset to use
+DATASET_PATH: atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset
+
+# Training hyperparameters
+hyperparameters:
+    num_train_epochs: 2
+    lr: 0.0001                          # usually 1e-4 is recommended for Qwen models
+    batch_size: 2                       # 2 for 0.5B, 1 for 1B, and 2 for 3B LoRA
+    gradient_accumulation_steps: 16     # 16 for 0.5B, 32 for 1B
+    # eval_accumulation_steps: 3        # to avoid OOM in eval. Slows down eval as it offloads to CPU.
+    max_grad_norm: 1.0
+    warmup_steps: 500
+    warmup_ratio: 0.1
+
+    # LoRA
+    USE_LORA: False # False or True
+    lora_r: 256
+    lora_alpha: 128
+    lora_dropout: 0.05
+    target_modules: 
+        - "q_proj"
+        - "k_proj"
+        - "v_proj"
+        - "o_proj"
+
+    # Logging and saving
+    logging_steps: 10
+    save_steps: 50
+    eval_steps: 50
+
+    optimizer: "adamw_torch_fused" # uses less memory than "adamw_torch"
+    MAX_LEN: 2048 # 1024 or 2048 (we do not have training samples with more than 2048 tokens)
+
+# Seed for reproducibility
+SEED: 42
+
+# metric that indicates best model
+METRIC_FOR_BEST_MODEL: "eval_loss"
+
+# precision in training
+FP16_TRAINING: True
+
+MODELS_DICT:
+    Qwen2.5-0.5B:
+        MODEL_PATH: "Qwen/Qwen2.5-0.5B"
+        SFT_TRAINING: true
+
+    Falcon3-1B-Base:
+        MODEL_PATH: "tiiuae/Falcon3-1B-Base"
+        SFT_TRAINING: true
