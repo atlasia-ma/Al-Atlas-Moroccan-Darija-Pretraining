@@ -1,7 +1,18 @@
 # Import necessary libraries
+import os
+import json
 import numpy as np
 import torch
 from scipy.stats import entropy
+
+# Tokenization function
+def tokenize_function(examples, text_column, tokenizer, max_length):
+    return tokenizer(
+        examples[text_column], 
+        truncation=True, 
+        max_length=max_length, 
+        padding="max_length"
+    )
 
 def preprocess_logits_for_metrics(logits, labels):
     """
@@ -35,7 +46,7 @@ def compute_metrics(eval_pred):
     
     # Cross-Entropy Loss
     loss_fn = torch.nn.CrossEntropyLoss()
-    loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1)).item()
+    loss = loss_fn(logits.view(-1, logits.size(-1)).float(), labels.view(-1)).item()
     
     # Perplexity
     perplexity = np.exp(loss)
@@ -79,3 +90,17 @@ def print_trainable_params_info(model):
     print(f"Total Parameters: {total_params:,}")
     print(f"Trainable Parameters: {trainable_params:,}")
     print(f"Reduction in Trainable Parameters: {reduction_percent:.2f}%")
+    
+
+def save_running_config(config, run_name): 
+    base_config_run_path = config['base_config_run_path']
+    os.makedirs(base_config_run_path, exist_ok=True)
+    
+    output_filename = f"{run_name}.json"
+    path_to_config_file = os.path.join(base_config_run_path, output_filename)
+    
+    # Save config as JSON
+    with open(path_to_config_file, 'w', encoding='utf-8') as output_file:
+        json.dump(config, output_file, indent=4, ensure_ascii=False)  # Pretty-printing for readability
+    
+    print(f"Configuration saved to {path_to_config_file}")
