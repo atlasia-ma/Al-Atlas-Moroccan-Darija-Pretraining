@@ -10,14 +10,12 @@ import yaml
 import wandb
 import torch
 from datasets import load_dataset
-import numpy as np
 import os
 from pprint import pprint
 
 
 from helpers import(
     set_seed,
-    print_trainable_params_info,
     save_running_config,
 )
 
@@ -135,10 +133,8 @@ if __name__ == "__main__":
             "num_train_epochs": num_train_epochs,
             "batch_size": batch_size,
             "warmup_ratio": warmup_ratio,
-            # "warmup_steps": warmup_steps,
             "max_grad_norm": max_grad_norm,
             "gradient_accumulation_steps": gradient_accumulation_steps,
-            # "weight_decay": weight_decay,
             "dataset": TRAIN_DATA_PATH,
         }
     )
@@ -171,7 +167,7 @@ if __name__ == "__main__":
         load_best_model_at_end=True,
         optim=config['hyperparameters']['optimizer'],
         gradient_checkpointing_kwargs={"use_reentrant": False} if config['hyperparameters']['USE_LORA'] else None,  # Avoids gradient issues in backprop when LoRA is set to True. # https://discuss.huggingface.co/t/how-to-combine-lora-and-gradient-checkpointing-in-whisper/50629
-        torch_compile=True, # Enable torch compile for faster training
+        # torch_compile=True, # Enable torch compile for faster training
     )
 
     # Initialize Trainer

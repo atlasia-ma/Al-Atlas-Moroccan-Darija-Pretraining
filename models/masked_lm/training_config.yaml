@@ -1,0 +1,54 @@
+# Project name and version for loggings and savings
+project_name: al_atlas_masked_lm
+version: v0.1
+
+# Which pretrained models to finetune
+BASE_MODEL: FacebookAI/xlm-roberta-large
+
+# Dataset to use
+DATASET_PATH: atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset
+
+# the text column
+text_column: text
+
+# Training hyperparameters
+hyperparameters:
+    num_train_epochs: 1
+    lr: 0.00005                          # usually 1e-4 is recommended for Qwen models
+    batch_size: 16                       # 2 for 0.5B, 1 for 1B, and 2 for 3B LoRA
+    gradient_accumulation_steps: 8     # 16 for 0.5B, 32 for 1B
+    # eval_accumulation_steps: 3        # to avoid OOM in eval. Slows down eval as it offloads to CPU.
+    max_grad_norm: 1.0
+    warmup_steps: 500
+    warmup_ratio: 0.1
+
+    # LoRA
+    USE_LORA: false # false or true
+    lora_r: 256
+    lora_alpha: 128
+    lora_dropout: 0.05
+    target_modules: 
+        - "q_proj"
+        - "k_proj"
+        - "v_proj"
+        - "o_proj"
+
+    # Logging and saving
+    logging_steps: 10
+    save_steps: 50
+    eval_steps: 50
+
+    optimizer: "adamw_torch_fused" # uses less memory than "adamw_torch"
+    MAX_LEN: 512 # as for base model
+
+# Seed for reproducibility
+SEED: 42
+
+# metric that indicates best model
+METRIC_FOR_BEST_MODEL: "loss"
+
+# precision in training
+FP16_TRAINING: true
+
+# where to save training configs
+base_config_run_path: "./run_configs/"
