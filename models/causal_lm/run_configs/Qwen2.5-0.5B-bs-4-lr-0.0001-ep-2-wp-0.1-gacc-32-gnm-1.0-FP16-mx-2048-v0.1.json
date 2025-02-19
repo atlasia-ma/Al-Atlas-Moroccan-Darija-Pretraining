@@ -1,0 +1,45 @@
+{
+    "project_name": "al_atlas_pretraining",
+    "version": "v0.1",
+    "BASE_MODEL": "Qwen2.5-0.5B",
+    "DATASET_PATH": "atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
+    "text_column": "text",
+    "hyperparameters": {
+        "num_train_epochs": 2,
+        "lr": 0.0001,
+        "batch_size": 4,
+        "gradient_accumulation_steps": 32,
+        "max_grad_norm": 1.0,
+        "warmup_steps": 500,
+        "warmup_ratio": 0.1,
+        "USE_LORA": false,
+        "lora_r": 256,
+        "lora_alpha": 128,
+        "lora_dropout": 0.05,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj"
+        ],
+        "logging_steps": 10,
+        "save_steps": 50,
+        "eval_steps": 50,
+        "optimizer": "adamw_torch_fused",
+        "MAX_LEN": 2048
+    },
+    "SEED": 42,
+    "METRIC_FOR_BEST_MODEL": "loss",
+    "FP16_TRAINING": true,
+    "base_config_run_path": "./run_configs/",
+    "MODELS_DICT": {
+        "Qwen2.5-0.5B": {
+            "MODEL_PATH": "Qwen/Qwen2.5-0.5B",
+            "SFT_TRAINING": false
+        },
+        "Falcon3-1B-Base": {
+            "MODEL_PATH": "tiiuae/Falcon3-1B-Base",
+            "SFT_TRAINING": false
+        }
+    }
+}
