@@ -15,7 +15,7 @@ from datasets import load_dataset
 import torch
 import yaml
 from pprint import pprint
-from utils import(
+from models.causal_lm.utils import(
     tokenize_function,
     preprocess_logits_for_metrics,
     compute_metrics,
