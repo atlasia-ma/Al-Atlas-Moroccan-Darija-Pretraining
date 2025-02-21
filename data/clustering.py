@@ -10,9 +10,7 @@ import textwrap
 from collections import Counter, defaultdict
 import faiss
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import plotly.express as px
 from huggingface_hub import InferenceClient
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import DBSCAN
@@ -21,6 +19,7 @@ from umap import UMAP
 from sklearn.manifold import TSNE
 from openai import OpenAI
 import time
+from scipy.stats import gaussian_kde
 
 logging.basicConfig(level=logging.INFO)
 
@@ -363,7 +362,7 @@ class ClusterClassifier:
             y = np.mean([self.projections[doc, 1] for doc in self.label2docs[label]])
             self.cluster_centers[label] = (x, y)
 
-    def show(self, interactive=False):
+    def show_old(self, interactive=False):
         df = pd.DataFrame(
             data={
                 "X": self.projections[:, 0],
@@ -379,6 +378,231 @@ class ClusterClassifier:
             self._show_plotly(df)
         else:
             self._show_mpl(df)
+            
+    def show(self, interactive=False, figure_style="paper"):
+        """
+        Enhanced visualization method for clustering results with soft boundaries
+        Args:
+            interactive (bool): Whether to use plotly (True) or matplotlib (False)
+            figure_style (str): Either "paper" or "default" for different styling options
+        """
+        df = pd.DataFrame(
+            data={
+                "X": self.projections[:, 0],
+                "Y": self.projections[:, 1],
+                "labels": self.cluster_labels,
+                "content_display": [
+                    textwrap.fill(txt[:1024], 64) for txt in self.texts
+                ],
+            }
+        )
+
+        if interactive:
+            self._show_plotly_enhanced(df, style=figure_style)
+        else:
+            self._show_mpl_enhanced(df, style=figure_style)
+
+    def _show_mpl_enhanced(self, df, style="paper"):
+        """Enhanced matplotlib visualization with soft, gradient-like cluster boundaries"""
+        plt.style.use('seaborn-whitegrid')
+        fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
+        
+        # Custom color palette with pastel colors
+        colors = {
+            -1: "#E6E6E6",  # noise color
+            0: "#FFB6C1",   # light pink
+            1: "#98FB98",   # pale green
+            2: "#87CEEB",   # sky blue
+            3: "#DDA0DD",   # plum
+            4: "#F0E68C",   # khaki
+            5: "#E6A8D7",   # light purple
+            6: "#98D8D8",   # light cyan
+            7: "#FFB347",   # pastel orange
+            8: "#87AFC7"    # pastel blue
+        }
+        
+        # Create density plot for each cluster
+        for label in sorted(df['labels'].unique()):
+            if label == -1:  # Skip noise points for density
+                continue
+                
+            mask = df['labels'] == label
+            points = df[mask]
+            
+            if len(points) >= 4:  # Need minimum points for KDE
+                # Calculate kernel density estimate
+                kde = gaussian_kde(points[['X', 'Y']].values.T)
+                
+                # Create a grid of points
+                x_range = np.linspace(points['X'].min(), points['X'].max(), 100)
+                y_range = np.linspace(points['Y'].min(), points['Y'].max(), 100)
+                x_grid, y_grid = np.meshgrid(x_range, y_range)
+                
+                # Evaluate KDE on the grid
+                positions = np.vstack([x_grid.ravel(), y_grid.ravel()])
+                z = kde(positions).reshape(x_grid.shape)
+                
+                # Plot contour with transparency
+                contours = ax.contourf(x_grid, y_grid, z, levels=10,
+                                    cmap=plt.cm.colors.LinearSegmentedColormap.from_list(
+                                        '', ['white', colors[label]]),
+                                    alpha=0.3)
+        
+        # Plot points
+        for label in sorted(df['labels'].unique()):
+            mask = df['labels'] == label
+            points = df[mask]
+            
+            if label == -1:  # Noise points
+                ax.scatter(points['X'], points['Y'], 
+                        c='gray', s=10, alpha=0.2, 
+                        label='Noise')
+            else:
+                ax.scatter(points['X'], points['Y'], 
+                        c=colors[label], s=20, alpha=0.6,
+                        label=f'Cluster {label}')
+        
+        if style == "paper":
+            # Publication-style formatting
+            ax.grid(False)  # Remove grid for cleaner look
+            ax.set_xlabel(f'{self.method.upper()} Dimension 1', fontsize=12)
+            ax.set_ylabel(f'{self.method.upper()} Dimension 2', fontsize=12)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_alpha(0.3)
+            ax.spines['bottom'].set_alpha(0.3)
+            plt.title('Document Clustering Results', fontsize=14, pad=20)
+            
+            # Clean up legend
+            legend = plt.legend(markerscale=0.8, frameon=True, 
+                            fontsize=8, bbox_to_anchor=(1.05, 1), 
+                            loc='upper left')
+            legend.get_frame().set_alpha(0.8)
+        else:
+            ax.set_axis_off()
+        
+        plt.tight_layout()
+        return fig
+
+    def _show_plotly_enhanced(self, df, style="paper"):
+        """Enhanced plotly visualization with soft, gradient-like cluster boundaries"""
+        
+        # Base color palette
+        base_colors = {
+            -1: "rgba(230, 230, 230, 0.5)",  # noise color
+            0: "rgba(255, 182, 193, 0.7)",    # light pink
+            1: "rgba(152, 251, 152, 0.7)",    # pale green
+            2: "rgba(135, 206, 235, 0.7)",    # sky blue
+            3: "rgba(221, 160, 221, 0.7)",    # plum
+            4: "rgba(240, 230, 140, 0.7)",    # khaki
+            5: "rgba(230, 168, 215, 0.7)",    # light purple
+            6: "rgba(152, 216, 216, 0.7)",    # light cyan
+            7: "rgba(255, 179, 71, 0.7)",     # pastel orange
+            8: "rgba(135, 175, 199, 0.7)"     # pastel blue
+        }
+        
+        # Dynamically generate colors for additional clusters
+        def get_color(label):
+            if label in base_colors:
+                return base_colors[label]
+            else:
+                # Generate a random color for labels not in the base_colors dictionary
+                import random
+                r = random.randint(0, 255)
+                g = random.randint(0, 255)
+                b = random.randint(0, 255)
+                return f"rgba({r}, {g}, {b}, 0.7)"
+        
+        fig = go.Figure()
+        
+        # Add density contours for each cluster
+        for label in sorted(df['labels'].unique()):
+            if label == -1:  # Skip noise points for density
+                continue
+                
+            mask = df['labels'] == label
+            points = df[mask]
+            
+            if len(points) >= 4:  # Need minimum points for contours
+                fig.add_trace(go.Histogram2dContour(
+                    x=points['X'],
+                    y=points['Y'],
+                    colorscale=[[0, 'rgba(255,255,255,0)'], 
+                            [1, get_color(label)]],
+                    showscale=False,
+                    ncontours=20,
+                    contours=dict(coloring='fill'),
+                    opacity=0.3,
+                    name=f'Cluster {label} density'
+                ))
+        
+        # Add scatter points
+        for label in sorted(df['labels'].unique()):
+            mask = df['labels'] == label
+            points = df[mask]
+            
+            if label == -1:
+                # Noise points
+                fig.add_trace(go.Scatter(
+                    x=points['X'], y=points['Y'],
+                    mode='markers',
+                    marker=dict(size=3, color='grey', opacity=0.2),
+                    name='Noise',
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=points['content_display']
+                ))
+            else:
+                # Cluster points
+                fig.add_trace(go.Scatter(
+                    x=points['X'], y=points['Y'],
+                    mode='markers',
+                    marker=dict(size=4, color=get_color(label).replace('0.7', '1')),
+                    name=f'Cluster {label}',
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=points['content_display']
+                ))
+        
+        if style == "paper":
+            # Publication-style layout
+            fig.update_layout(
+                template="plotly_white",
+                width=1200,
+                height=800,
+                title=dict(
+                    text='Document Clustering Results',
+                    x=0.5,
+                    y=0.95
+                ),
+                xaxis=dict(
+                    title=f'{self.method.upper()} Dimension 1',
+                    showgrid=False,
+                    zeroline=False
+                ),
+                yaxis=dict(
+                    title=f'{self.method.upper()} Dimension 2',
+                    showgrid=False,
+                    zeroline=False
+                ),
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.05,
+                    bordercolor="Black",
+                    borderwidth=1
+                ),
+                margin=dict(r=150)
+            )
+        else:
+            fig.update_layout(
+                template="plotly_white",
+                width=1200,
+                height=800,
+                showlegend=True
+            )
+        
+        fig.show()
 
     def _show_mpl(self, df):
         fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
