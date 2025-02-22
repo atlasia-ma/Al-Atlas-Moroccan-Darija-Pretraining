@@ -379,27 +379,43 @@ class ClusterClassifier:
         else:
             self._show_mpl(df)
             
-    def show(self, interactive=False, figure_style="paper"):
+    def show(self, interactive=False, figure_style="paper", dim_3d=False):
         """
-        Enhanced visualization method for clustering results with soft boundaries
+        Enhanced visualization method for clustering results
         Args:
             interactive (bool): Whether to use plotly (True) or matplotlib (False)
             figure_style (str): Either "paper" or "default" for different styling options
+            dim_3d (bool): Whether to show 3D visualization (only works with interactive=True)
         """
-        df = pd.DataFrame(
-            data={
-                "X": self.projections[:, 0],
-                "Y": self.projections[:, 1],
-                "labels": self.cluster_labels,
-                "content_display": [
-                    textwrap.fill(txt[:1024], 64) for txt in self.texts
-                ],
-            }
-        )
+        # Check if 3D is possible
+        if dim_3d and self.n_components < 3:
+            print("Warning: 3D visualization requested but n_components < 3. Falling back to 2D.")
+            dim_3d = False
+
+        # Create DataFrame with appropriate dimensions
+        data_dict = {
+            "X": self.projections[:, 0],
+            "Y": self.projections[:, 1],
+            "labels": self.cluster_labels,
+            "content_display": [
+                textwrap.fill(txt[:1024], 64) for txt in self.texts
+            ],
+        }
+        
+        # Add Z coordinate if using 3D
+        if dim_3d and self.projections.shape[1] >= 3:
+            data_dict["Z"] = self.projections[:, 2]
+        
+        df = pd.DataFrame(data=data_dict)
 
         if interactive:
-            self._show_plotly_enhanced(df, style=figure_style)
+            if dim_3d:
+                self._show_plotly_3d(df, style=figure_style)
+            else:
+                self._show_plotly_enhanced(df, style=figure_style)
         else:
+            if dim_3d:
+                print("3D visualization is only available with interactive=True")
             self._show_mpl_enhanced(df, style=figure_style)
 
     def _show_mpl_enhanced(self, df, style="paper"):
@@ -530,9 +546,9 @@ class ClusterClassifier:
                     colorscale=[[0, 'rgba(255,255,255,0)'], 
                             [1, get_color(label)]],
                     showscale=False,
-                    ncontours=20,
+                    ncontours=10,
                     contours=dict(coloring='fill'),
-                    opacity=0.3,
+                    opacity=0.7,
                     name=f'Cluster {label} density'
                 ))
         
@@ -546,7 +562,7 @@ class ClusterClassifier:
                 fig.add_trace(go.Scatter(
                     x=points['X'], y=points['Y'],
                     mode='markers',
-                    marker=dict(size=3, color='grey', opacity=0.2),
+                    marker=dict(size=2, color='grey', opacity=0.1),
                     name='Noise',
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=points['content_display']
@@ -556,7 +572,7 @@ class ClusterClassifier:
                 fig.add_trace(go.Scatter(
                     x=points['X'], y=points['Y'],
                     mode='markers',
-                    marker=dict(size=4, color=get_color(label).replace('0.7', '1')),
+                    marker=dict(size=2, color=get_color(label).replace('0.7', '1')),
                     name=f'Cluster {label}',
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=points['content_display']
@@ -569,7 +585,7 @@ class ClusterClassifier:
                 width=1200,
                 height=800,
                 title=dict(
-                    text='Document Clustering Results',
+                    text='Clustering',
                     x=0.5,
                     y=0.95
                 ),
@@ -743,4 +759,133 @@ class ClusterClassifier:
                     yshift=0,
                 )
 
+        fig.show()
+
+    def _show_plotly_3d(self, df, style="paper"):
+        """Enhanced 3D plotly visualization"""
+        
+        # Base color palette
+        base_colors = {
+            -1: "rgba(230, 230, 230, 0.5)",  # noise color
+            0: "rgba(255, 182, 193, 0.7)",    # light pink
+            1: "rgba(152, 251, 152, 0.7)",    # pale green
+            2: "rgba(135, 206, 235, 0.7)",    # sky blue
+            3: "rgba(221, 160, 221, 0.7)",    # plum
+            4: "rgba(240, 230, 140, 0.7)",    # khaki
+            5: "rgba(230, 168, 215, 0.7)",    # light purple
+            6: "rgba(152, 216, 216, 0.7)",    # light cyan
+            7: "rgba(255, 179, 71, 0.7)",     # pastel orange
+            8: "rgba(135, 175, 199, 0.7)"     # pastel blue
+        }
+        
+        # Create the 3D scatter plot
+        fig = go.Figure()
+        
+        # Add points for each cluster
+        for label in sorted(df['labels'].unique()):
+            mask = df['labels'] == label
+            points = df[mask]
+            
+            color = base_colors.get(label, base_colors[0])  # Default to first color if not found
+            
+            # Different styling for noise points
+            if label == -1:
+                marker_props = dict(
+                    size=3,
+                    color='grey',
+                    opacity=0.1,
+                    symbol='circle'
+                )
+                name = 'Noise'
+            else:
+                marker_props = dict(
+                    size=4,
+                    color=color,
+                    opacity=0.7,
+                    symbol='circle'
+                )
+                name = f'Cluster {label}'
+                
+                # Add cluster centers if summaries exist
+                if hasattr(self, 'cluster_summaries') and self.cluster_summaries:
+                    summary = self.cluster_summaries.get(label, '')
+                    if summary and summary != 'None':
+                        center_x = points['X'].mean()
+                        center_y = points['Y'].mean()
+                        center_z = points['Z'].mean()
+                        
+                        # Add text annotation for cluster center
+                        fig.add_trace(go.Scatter3d(
+                            x=[center_x],
+                            y=[center_y],
+                            z=[center_z],
+                            mode='text',
+                            text=[summary],
+                            textposition='middle center',
+                            textfont=dict(size=10, color='black'),
+                            showlegend=False
+                        ))
+            
+            # Add the scatter points
+            fig.add_trace(go.Scatter3d(
+                x=points['X'],
+                y=points['Y'],
+                z=points['Z'],
+                mode='markers',
+                marker=marker_props,
+                name=name,
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=points['content_display']
+            ))
+        
+        # Update layout based on style
+        if style == "paper":
+            fig.update_layout(
+                template="plotly_white",
+                width=1200,
+                height=800,
+                title=dict(
+                    text=f'3D {self.method.upper()} Clustering Visualization',
+                    x=0.5,
+                    y=0.95
+                ),
+                scene=dict(
+                    xaxis_title=f'{self.method.upper()} Dimension 1',
+                    yaxis_title=f'{self.method.upper()} Dimension 2',
+                    zaxis_title=f'{self.method.upper()} Dimension 3',
+                    xaxis=dict(showgrid=True, zeroline=False, showline=True),
+                    yaxis=dict(showgrid=True, zeroline=False, showline=True),
+                    zaxis=dict(showgrid=True, zeroline=False, showline=True),
+                    camera=dict(
+                        up=dict(x=0, y=0, z=1),
+                        center=dict(x=0, y=0, z=0),
+                        eye=dict(x=1.5, y=1.5, z=1.5)
+                    )
+                ),
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.05,
+                    bordercolor="Black",
+                    borderwidth=1
+                ),
+                margin=dict(r=150)
+            )
+        else:
+            fig.update_layout(
+                template="plotly_white",
+                width=1200,
+                height=800,
+                showlegend=True,
+                scene=dict(
+                    camera=dict(
+                        up=dict(x=0, y=0, z=1),
+                        center=dict(x=0, y=0, z=0),
+                        eye=dict(x=1.5, y=1.5, z=1.5)
+                    )
+                )
+            )
+        
         fig.show()
