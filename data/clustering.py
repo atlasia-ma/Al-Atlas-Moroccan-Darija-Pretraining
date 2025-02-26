@@ -26,10 +26,11 @@ logging.basicConfig(level=logging.INFO)
 
 DEFAULT_INSTRUCTION = (
     instruction
-) = "Use three words total (comma separated)\
-to describe general topics in above texts. Under no circumstances use enumeration. \
-You SHOULD TO use the same language of text (eg. arabic, darija, english...)\
-Example format: Tree, Cat, Fireman"
+) = """
+Describe the common theme or topic in the above text samples in a single, concise sentence. Keep your sentence under 3 words and do not say anything else but the topic and do not add any explanation or leading sentence!!
+You SHOULD use english to describe the topics.\
+Example of topics include (but not limited to): Sociology, Politics, News, Moroccan cooking recipes, Hair care receipes, Islamic Fatwas on fasting, etc.
+"""
 
 DEFAULT_TEMPLATE = "<s>[INST]{examples}\n\n{instruction}[/INST]"
 
@@ -142,8 +143,13 @@ class ClusterClassifier:
         self.faiss_index = self.build_faiss_index(self.embeddings)
         logging.info(f"projecting with {self.method}...")
         self.projections, self.umap_mapper = self.project(self.embeddings)
-        logging.info("dbscan clustering on projected embeddings...")
-        self.cluster_labels = self.cluster(self.projections)
+        # logging.info("dbscan clustering on projected embeddings...")
+        # self.cluster_labels = self.cluster(self.projections)
+        
+        logging.info("dbscan clustering on embeddings...")
+        self.cluster_labels = self.cluster(self.embeddings)
+        
+        logging.info(f"Found {len(set(self.cluster_labels))} clusters")
 
         self.id2cluster = {
             index: label for index, label in enumerate(self.cluster_labels)
@@ -187,21 +193,17 @@ class ClusterClassifier:
         )
 
         return embeddings
-
-    # def project(self, embeddings):
-    #     mapper = UMAP(n_components=self.umap_components, metric=self.umap_metric).fit(
-    #         embeddings
-    #     )
-    #     return mapper.embedding_, mapper
     
     def project(self, embeddings):
         """Project embeddings to lower dimensional space"""
-        if self.method == 'tsne':
+        if self.method.upper() == 'TSNE':
             embedding = self.mapper.fit_transform(embeddings)
             return embedding, self.mapper
-        else:  # umap
+        elif self.method.upper() == 'UMAP':
             self.mapper.fit(embeddings)
             return self.mapper.embedding_, self.mapper
+        else:
+            raise NotImplementedError(f"Method {self.method} not implemented. Choose 'tsne' or 'umap'.")
 
     def cluster(self, embeddings):
         print(
@@ -267,36 +269,9 @@ class ClusterClassifier:
                   examples=examples, instruction=self.summary_instruction
               )
               response = client.text_generation(request)
-            if label == 0:
-                print(f"Request:\n{request}")
-            cluster_summaries[label] = self._postprocess_response(response)
-        print(f"Number of clusters is {len(cluster_summaries)}")
+              print(f'topic response: {response}')
+            cluster_summaries[label] = response
         return cluster_summaries
-
-    def _postprocess_response(self, response):
-        if self.topic_mode == "multiple_topics":
-            summary = response.split("\n")[0].split(".")[0].split("(")[0]
-            summary = ",".join(
-                [txt for txt in summary.strip().split(",") if len(txt) > 0]
-            )
-            return summary
-        elif self.topic_mode == "single_topic":
-            first_line = response.split("\n")[0]
-            topic, score = None, None
-            try:
-                topic = first_line.split("Topic:")[1].split("(")[0].split(",")[0].strip()
-            except IndexError:
-                print("No topic found")
-            try:
-                score = first_line.split("Educational value rating:")[1].strip().split(".")[0].strip()
-            except IndexError:
-                print("No educational score found")
-            full_output = f"{topic}. Educational score: {score}"
-            return full_output
-        else:
-            raise ValueError(
-                f"Topic labeling mode {self.topic_mode} is not supported, use single_topic or multiple_topics instead."
-            )
 
     def save(self, folder):
         if not os.path.exists(folder):
@@ -379,7 +354,7 @@ class ClusterClassifier:
         else:
             self._show_mpl(df)
             
-    def show(self, interactive=False, figure_style="paper", dim_3d=False):
+    def show(self, interactive=False, figure_style="paper", dim_3d=False, show_summaries=True):
         """
         Enhanced visualization method for clustering results
         Args:
@@ -412,7 +387,7 @@ class ClusterClassifier:
             if dim_3d:
                 self._show_plotly_3d(df, style=figure_style)
             else:
-                self._show_plotly_enhanced(df, style=figure_style)
+                self._show_plotly_enhanced(df, style=figure_style, show_summaries=show_summaries)
         else:
             if dim_3d:
                 print("3D visualization is only available with interactive=True")
@@ -470,13 +445,23 @@ class ClusterClassifier:
             points = df[mask]
             
             if label == -1:  # Noise points
-                ax.scatter(points['X'], points['Y'], 
-                        c='gray', s=10, alpha=0.2, 
-                        label='Noise')
+                ax.scatter(
+                    points['X'],
+                    points['Y'], 
+                    c='gray', 
+                    s=10,
+                    alpha=0.2, 
+                    label='Noise'
+                )
             else:
-                ax.scatter(points['X'], points['Y'], 
-                        c=colors[label], s=20, alpha=0.6,
-                        label=f'Cluster {label}')
+                ax.scatter(
+                    points['X'],
+                    points['Y'], 
+                    c=colors[label], 
+                    s=20, 
+                    alpha=0.6,
+                    label=f'{self.cluster_summaries.get(label, f"Cluster {label}")}'
+                )
         
         if style == "paper":
             # Publication-style formatting
@@ -500,7 +485,7 @@ class ClusterClassifier:
         plt.tight_layout()
         return fig
 
-    def _show_plotly_enhanced(self, df, style="paper"):
+    def _show_plotly_enhanced(self, df, style="paper", show_summaries=True):
         """Enhanced plotly visualization with soft, gradient-like cluster boundaries"""
         
         # Base color palette
@@ -546,7 +531,7 @@ class ClusterClassifier:
                     colorscale=[[0, 'rgba(255,255,255,0)'], 
                             [1, get_color(label)]],
                     showscale=False,
-                    ncontours=10,
+                    ncontours=15,
                     contours=dict(coloring='fill'),
                     opacity=0.7,
                     name=f'Cluster {label} density'
@@ -562,7 +547,7 @@ class ClusterClassifier:
                 fig.add_trace(go.Scatter(
                     x=points['X'], y=points['Y'],
                     mode='markers',
-                    marker=dict(size=2, color='grey', opacity=0.1),
+                    marker=dict(size=3, color='grey', opacity=0.1),
                     name='Noise',
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=points['content_display']
@@ -572,8 +557,8 @@ class ClusterClassifier:
                 fig.add_trace(go.Scatter(
                     x=points['X'], y=points['Y'],
                     mode='markers',
-                    marker=dict(size=2, color=get_color(label).replace('0.7', '1')),
-                    name=f'Cluster {label}',
+                    marker=dict(size=3, color=get_color(label).replace('0.7', '1')),
+                    name=f'{self.cluster_summaries.get(label, f"Cluster {label}")}' if show_summaries else f"Cluster {label}",
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=points['content_display']
                 ))
