@@ -554,7 +554,7 @@ class ClusterClassifier:
                     fig.add_trace(go.Scatter(
                         x=points['X'], y=points['Y'],
                         mode='markers',
-                        marker=dict(size=3, color='grey', opacity=0.1),
+                        marker=dict(size=2, color='grey', opacity=0.1),
                         name='Noise',
                         hovertemplate='%{customdata}<extra></extra>',
                         customdata=points['content_display']
@@ -564,7 +564,7 @@ class ClusterClassifier:
                 fig.add_trace(go.Scatter(
                     x=points['X'], y=points['Y'],
                     mode='markers',
-                    marker=dict(size=3, color=get_color(label).replace('0.7', '1')),
+                    marker=dict(size=2, color=get_color(label).replace('0.7', '1')),
                     name=f'{self.cluster_summaries.get(label, f"Cluster {label}")}' if show_summaries else f"Cluster {label}",
                     hovertemplate='%{customdata}<extra></extra>',
                     customdata=points['content_display']
@@ -576,11 +576,11 @@ class ClusterClassifier:
                 template="plotly_white",
                 width=1200,
                 height=800,
-                title=dict(
-                    text='Clustering',
-                    x=0.5,
-                    y=0.95
-                ),
+                # title=dict(
+                #     text='Clustering',
+                #     x=0.5,
+                #     y=0.95
+                # ),
                 xaxis=dict(
                     title=f'{self.method.upper()} Dimension 1',
                     showgrid=False,
