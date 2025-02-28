@@ -249,7 +249,7 @@ class ClusterClassifier:
               count=0
               while True:
                 try:
-                  print(f"[INFO] Summerize...")
+                  print(f"[INFO] Summarizing...")
                   request=f"{examples}\n\n{instruction}"
                   response=client.chat.completions.create(
                     messages=[
