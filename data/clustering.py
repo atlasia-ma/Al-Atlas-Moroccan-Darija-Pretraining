@@ -27,9 +27,9 @@ logging.basicConfig(level=logging.INFO)
 DEFAULT_INSTRUCTION = (
     instruction
 ) = """
-Describe the common theme or topic in the above text samples in a single, concise sentence. Keep your sentence under 3 words and do not say anything else but the topic and do not add any explanation or leading sentence!!
+Your task is to describe the common theme or topic in the above text samples in a single, concise sentence. Keep your sentence under 5-7 words and do not say anything else but the topic and do not add any explanation or leading sentence!!
 You SHOULD use english to describe the topics.\
-Example of topics include (but not limited to): Sociology, Politics, News, Moroccan cooking recipes, Hair care receipes, Islamic Fatwas on fasting, etc.
+Example of topics include (but not limited to): Sociology, Politics, News, Moroccan cooking recipes, Hair care receipes, Islamic Fatwas on fasting, Islamic Fatwas on mariage, etc.
 """
 
 DEFAULT_TEMPLATE = "<s>[INST]{examples}\n\n{instruction}[/INST]"
@@ -57,6 +57,7 @@ class ClusterClassifier:
         summary_template=None,
         summary_instruction=None,
         use_gemini=False,
+        cluster_projected=True,
         gemini_token="",
         max_retry=6,
         matryoshka_dim=64,
@@ -74,6 +75,7 @@ class ClusterClassifier:
         self.embed_max_seq_length = embed_max_seq_length
         self.embed_agg_strategy = embed_agg_strategy
         self.embed_dim = matryoshka_dim
+        self.cluster_projected = cluster_projected
 
         self.method = method.lower()
         self.n_components = n_components
@@ -143,11 +145,13 @@ class ClusterClassifier:
         self.faiss_index = self.build_faiss_index(self.embeddings)
         logging.info(f"projecting with {self.method}...")
         self.projections, self.umap_mapper = self.project(self.embeddings)
-        # logging.info("dbscan clustering on projected embeddings...")
-        # self.cluster_labels = self.cluster(self.projections)
         
-        logging.info("dbscan clustering on embeddings...")
-        self.cluster_labels = self.cluster(self.embeddings)
+        if self.cluster_projected:
+            logging.info("dbscan clustering on projected embeddings...")
+            self.cluster_labels = self.cluster(self.projections)
+        else:
+            logging.info("dbscan clustering on embeddings...")
+            self.cluster_labels = self.cluster(self.embeddings)
         
         logging.info(f"Found {len(set(self.cluster_labels))} clusters")
 
