@@ -237,7 +237,7 @@ class ClusterClassifier:
         else:
           client = InferenceClient(self.summary_model, token=self.summary_model_token)
 
-        for i,label in enumerate(range(unique_labels)):
+        for i,label in tqdm(enumerate(range(unique_labels)), desc="Summarizing..."):
             ids = np.random.choice(self.label2docs[label], self.summary_n_examples)
             examples = "\n\n".join(
                 [
@@ -249,7 +249,6 @@ class ClusterClassifier:
               count=0
               while True:
                 try:
-                  print(f"[INFO] Summarizing...")
                   request=f"{examples}\n\n{instruction}"
                   response=client.chat.completions.create(
                     messages=[
@@ -303,6 +302,7 @@ class ClusterClassifier:
                 json.dump(self.cluster_summaries, f)
 
     def load(self, folder):
+        print("[INFO] Loading pre-computed clusters...")
         if not os.path.exists(folder):
             raise ValueError(f"The folder '{folder}' does not exsit.")
 
@@ -358,7 +358,7 @@ class ClusterClassifier:
         else:
             self._show_mpl(df)
             
-    def show(self, interactive=False, figure_style="paper", dim_3d=False, show_summaries=True):
+    def show(self, interactive=False, figure_style="paper", dim_3d=False, show_summaries=True, include_noise_points=True):
         """
         Enhanced visualization method for clustering results
         Args:
@@ -389,13 +389,15 @@ class ClusterClassifier:
 
         if interactive:
             if dim_3d:
-                self._show_plotly_3d(df, style=figure_style)
+                fig = self._show_plotly_3d(df, style=figure_style)
             else:
-                self._show_plotly_enhanced(df, style=figure_style, show_summaries=show_summaries)
+                fig = self._show_plotly_enhanced(df, style=figure_style, show_summaries=show_summaries, include_noise_points=include_noise_points)
         else:
             if dim_3d:
                 print("3D visualization is only available with interactive=True")
-            self._show_mpl_enhanced(df, style=figure_style)
+            fig = self._show_mpl_enhanced(df, style=figure_style)
+            
+        return fig
 
     def _show_mpl_enhanced(self, df, style="paper"):
         """Enhanced matplotlib visualization with soft, gradient-like cluster boundaries"""
@@ -489,7 +491,7 @@ class ClusterClassifier:
         plt.tight_layout()
         return fig
 
-    def _show_plotly_enhanced(self, df, style="paper", show_summaries=True):
+    def _show_plotly_enhanced(self, df, style="paper", show_summaries=True, include_noise_points=True):
         """Enhanced plotly visualization with soft, gradient-like cluster boundaries"""
         
         # Base color palette
@@ -547,15 +549,16 @@ class ClusterClassifier:
             points = df[mask]
             
             if label == -1:
-                # Noise points
-                fig.add_trace(go.Scatter(
-                    x=points['X'], y=points['Y'],
-                    mode='markers',
-                    marker=dict(size=3, color='grey', opacity=0.1),
-                    name='Noise',
-                    hovertemplate='%{customdata}<extra></extra>',
-                    customdata=points['content_display']
-                ))
+                if include_noise_points:
+                    # Noise points
+                    fig.add_trace(go.Scatter(
+                        x=points['X'], y=points['Y'],
+                        mode='markers',
+                        marker=dict(size=3, color='grey', opacity=0.1),
+                        name='Noise',
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=points['content_display']
+                    ))
             else:
                 # Cluster points
                 fig.add_trace(go.Scatter(
@@ -608,6 +611,8 @@ class ClusterClassifier:
             )
         
         fig.show()
+        
+        return fig
 
     def _show_mpl(self, df):
         fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
@@ -878,3 +883,5 @@ class ClusterClassifier:
             )
         
         fig.show()
+        
+        return fig
