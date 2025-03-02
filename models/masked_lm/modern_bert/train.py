@@ -1,6 +1,10 @@
 import os
 import torch
-from datasets import load_dataset
+from datasets import (
+    load_dataset,
+    concatenate_datasets,
+)
+
 from transformers import (
     AutoTokenizer,
     AutoModelForMaskedLM,
@@ -10,62 +14,199 @@ from transformers import (
     Trainer
 )
 
+import math
 from utils import (
+    GradualContextLengthExtensionTrainer,
     Config,
+    tokenize_function,
+    extend_position_embeddings,
     info,
     batch_iter,
-    pre_processing
+    pre_processing,
+    preprocess_dataset,
 )
 
 import wandb
 
+TRAINING_STAGE = 2
+# Starting context length
+INITIAL_MAX_LENGTH = 1024
+# Target context length
+FINAL_MAX_LENGTH = 8192
+# warmup ratio setps for context length extension
+PERCENTAGE_STEPS_PER_WARMUP = 0.005 
+
+# Define specific breakpoints
+context_lengths_extension_breakpoints = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # 6 breakpoint steps
+context_lengths_extension_sequence = [
+    INITIAL_MAX_LENGTH,
+    INITIAL_MAX_LENGTH + (FINAL_MAX_LENGTH - INITIAL_MAX_LENGTH) // 5,
+    INITIAL_MAX_LENGTH + 2 * (FINAL_MAX_LENGTH - INITIAL_MAX_LENGTH) // 5,
+    INITIAL_MAX_LENGTH + 3 * (FINAL_MAX_LENGTH - INITIAL_MAX_LENGTH) // 5,
+    INITIAL_MAX_LENGTH + 4 * (FINAL_MAX_LENGTH - INITIAL_MAX_LENGTH) // 5,
+    FINAL_MAX_LENGTH
+]  
+        
+ARABIC_TRAIN = True
+
 if __name__ == "__main__":
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    configs=Config(
-        data_path="ClusterlabAi/101_billion_arabic_words_dataset", #"wikimedia/wikipedia", #"atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
-        hub_path="BounharAbdelaziz/Modern-BERT-Arabic-Base", #"BounharAbdelaziz/Modern-BERT-Morocco-Darija-Base",
-        base_dir="./modernbert_ar_101B_base",
-        max_length=1024,
-        new_vocab_size=70_000,
-        num_train_epochs=1,
-        batch_size=16,
-        gradient_accumulation_steps=16,
-        max_grad_norm=1,
-        lr=5e-4,
-        warmup_ratio=0.05,
-        version="v1",
-        logging_steps=50,
-        eval_steps=100,
-        save_steps=100,        
-    )
-    ARABIC_TRAIN = True
+    if TRAINING_STAGE == 1:
+        # train on web-crawled data
+        configs=Config(
+            data_path="ClusterlabAi/101_billion_arabic_words_dataset", #"wikimedia/wikipedia", #"atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
+            hub_path="BounharAbdelaziz/Modern-BERT-Arabic-Base", #"BounharAbdelaziz/Modern-BERT-Morocco-Darija-Base",
+            base_dir="./modernbert_ar_101B_base",
+            max_length=1024,
+            new_vocab_size=70_000,
+            num_train_epochs=1,
+            batch_size=16,
+            gradient_accumulation_steps=16,
+            max_grad_norm=1,
+            lr=5e-4,
+            warmup_ratio=0.05,
+            version=f"v1-stage-{TRAINING_STAGE}",
+            logging_steps=50,
+            eval_steps=100,
+            save_steps=100,    
+            mlm_probability=0.15,
+        )
+        
+        arabic_config = "20231101.ar"
+        DATASET_NAME = configs.data_path
+        print(f'DATASET_NAME: {DATASET_NAME}')
+        print(f'ARABIC_TRAIN: {ARABIC_TRAIN}')
+        print(f'arabic_config: {arabic_config}')
+        print(f'hub_path: {configs.hub_path}')
+        
+        info("Loading dataset...")
+        if ARABIC_TRAIN:
+            dataset=load_dataset(DATASET_NAME) #, arabic_config)
+        else:
+            dataset=load_dataset(DATASET_NAME)
+            
+        train_dataset = dataset["train"]
+        test_dataset = dataset["test"]
+        
+        info("Dataset loaded.")
     
-    # configs=Config(
-    #     data_path="atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
-    #     hub_path="BounharAbdelaziz/Modern-BERT-Morocco-Darija-Base",
-    #     base_dir="./modernbert_darija_base",
-    #     num_train_epochs=2,
-    #     batch_size=8,
-    #     gradient_accumulation_steps=16,
-    #     max_grad_norm=1,
-    #     lr=5e-3,
-    #     warmup_ratio=0.07,
-    #     version="v1",
-    #     logging_steps=50,
-    #     eval_steps=100,
-    #     save_steps=100,        
-    # )
-    # ARABIC_TRAIN = False
-    
-    arabic_config = "20231101.ar"
-    DATASET_NAME = configs.data_path
-    print(f'DATASET_NAME: {DATASET_NAME}')
-    print(f'ARABIC_TRAIN: {ARABIC_TRAIN}')
-    print(f'arabic_config: {arabic_config}')
-    print(f'hub_path: {configs.hub_path}')
-    
+    elif TRAINING_STAGE == 2:
+        # train on educational, books, and reasoning (including mathematics) data
+        # + context extension 
+        # + more proba to mask
+        configs=Config(
+            hub_path=f"ModernBERT-Arabic-base-stage-2-pre-decay-predef-bkpt",
+            base_dir="./modernbert_ar_101B_base_2",
+            num_train_epochs=1,
+            batch_size=16,
+            gradient_accumulation_steps=16,
+            max_grad_norm=1,
+            lr=5e-4,
+            warmup_ratio=0, # no warmup, just continue
+            version=f"v1-stage-{TRAINING_STAGE}",
+            logging_steps=50,
+            eval_steps=100,
+            save_steps=100,   
+            mlm_probability=0.3, # increased difficulty and 0.3 works optimaly for english modernbert
+        )
+        
+        # books
+        books_dataset = load_dataset('alielfilali01/Hindawi-Books-dataset', split='train') # ChapterText col
+        # religion
+        quran_tafseer_1_dataset = load_dataset('MohamedRashad/Quran-Tafseer', split='train') # tafsir_content col
+        quran_tafseer_2_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--mustapha--QuranExe', split='train') # text col
+        # general knowlegde
+        arabic_wikipedia_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--Wikipedia', split='train') # text col
+        # reasoning
+        reasoning_dataset = load_dataset('Omartificial-Intelligence-Space/Arabic_Reasoning_Dataset', split='train') # concat 'instruction' + 'answer' col
+        
+        # Load all datasets with their specific columns of interest
+        # Books dataset
+        books_dataset = load_dataset('alielfilali01/Hindawi-Books-dataset', split='train')
+        books_processed = preprocess_dataset(books_dataset, "ChapterText") # ChapterText col
+        info("Books dataset loaded and processed.")
+        
+        # Quran tafseer datasets
+        quran_tafseer_1 = load_dataset('MohamedRashad/Quran-Tafseer', split='train')
+        quran_tafseer_1_processed = preprocess_dataset(quran_tafseer_1, "tafsir_content") # tafsir_content col
+        info("Quran tafseer 1 dataset loaded and processed.")
+        
+        quran_tafseer_2 = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--mustapha--QuranExe', split='train')
+        quran_tafseer_2_processed = preprocess_dataset(quran_tafseer_2, "text") # text col
+        info("Quran tafseer 2 dataset loaded and processed.")
+        
+        # Wikipedia dataset
+        wikipedia_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--Wikipedia', split='train')
+        wikipedia_processed = preprocess_dataset(wikipedia_dataset, "text") # text col
+        info("Wikipedia dataset loaded and processed.")
+        
+        # Reasoning dataset
+        reasoning_dataset = load_dataset('Omartificial-Intelligence-Space/Arabic_Reasoning_Dataset', split='train')
+        reasoning_processed = preprocess_dataset(reasoning_dataset, None, "instruction", "answer") # concat 'instruction' + 'answer' col
+        info("Reasoning dataset loaded and processed.")
+        
+        # Combine all datasets into one
+        info("Combining all datasets...")
+        combined_dataset = concatenate_datasets([
+            books_processed,
+            quran_tafseer_1_processed,
+            quran_tafseer_2_processed,
+            wikipedia_processed,
+            reasoning_processed
+        ]) #.select(range(100))
+        info(f"Combined dataset created with {len(combined_dataset)} examples.")
+        
+        # Create a small validation split for tracking training progress
+        combined_dataset = combined_dataset.train_test_split(test_size=0.01, seed=1998)
+        train_dataset = combined_dataset["train"]
+        val_dataset = combined_dataset["test"]
+        info(f"train_dataset: {train_dataset}")
+        info(f"val_dataset: {val_dataset}")
+        
+        
+    elif TRAINING_STAGE == 3:
+        # decay stage: finetune on a specific language
+        configs=Config(
+            data_path="atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
+            hub_path="BounharAbdelaziz/Modern-BERT-Morocco-Darija-Base",
+            base_dir="./modernbert_darija_base",
+            num_train_epochs=2,
+            batch_size=16,
+            gradient_accumulation_steps=16,
+            max_grad_norm=1,
+            lr=1e-6,
+            warmup_ratio=0,
+            version=f"v1-stage-{TRAINING_STAGE}",
+            logging_steps=50,
+            eval_steps=100,
+            save_steps=100,        
+        )
+        
+        # # morocco news in arabic
+        # https://huggingface.co/datasets/M-A-D/Mixed-Arabic-Datasets-Repo/viewer/Ara--J-Mourad--MNAD.v1?views%5B%5D=ara__j_mourad__mnadv1 
+        ARABIC_TRAIN = False
+        
+        arabic_config = "20231101.ar"
+        DATASET_NAME = configs.data_path
+        print(f'DATASET_NAME: {DATASET_NAME}')
+        print(f'ARABIC_TRAIN: {ARABIC_TRAIN}')
+        print(f'arabic_config: {arabic_config}')
+        print(f'hub_path: {configs.hub_path}')
+        
+        info("Loading dataset...")
+        dataset=load_dataset(DATASET_NAME)
+        info("Dataset loaded.")
+
     # Initialize wandb
+    gradual_extension = True if TRAINING_STAGE == 2 else False
+    WANDB_CONFIG = {
+        "initial_max_length": INITIAL_MAX_LENGTH,
+        "final_max_length": FINAL_MAX_LENGTH,
+        "gradual_extension": gradual_extension,
+        "stage": TRAINING_STAGE
+    }
     wandb.init(
         # set the wandb project where this run will be logged, all runs will be under this project
         project=configs.wandb_project_name,   
@@ -73,53 +214,71 @@ if __name__ == "__main__":
         group=configs.hub_path,       
         # Unique run name
         name=configs.run_name,
+        config=WANDB_CONFIG
     )
-    
-    info("Loading dataset...")
-    if ARABIC_TRAIN:
-        dataset=load_dataset(DATASET_NAME) #, arabic_config)
-    else:
-        dataset=load_dataset(DATASET_NAME)
-    info("Dataset loaded.")
-
-    info("Loading base tokenizer...")
-    base_tokenizer = AutoTokenizer.from_pretrained(
-        configs.base_model_name,
-        use_fast=True
-    )
-
-    if os.path.exists(f"{configs.base_dir}/tokenizer"):
-        info("Loading the pretrained new tokenizer...")
-        new_tokenizer=AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True)
-        info("New tokenizer loaded.")
-        
-    else:
-        info("Training new Darija tokenizer")
-        train_iterator=batch_iter(dataset["train"])
-        new_tokenizer=base_tokenizer.train_new_from_iterator(
-            text_iterator=train_iterator,
-            vocab_size=configs.new_vocab_size,
-            show_progress=True
+   
+    # Load tokenizer and tokenize dataset
+    if TRAINING_STAGE == 1:
+   
+        info("Loading base tokenizer...")
+        base_tokenizer = AutoTokenizer.from_pretrained(
+            configs.base_model_name,
+            use_fast=True
         )
 
-        info("Saving the new tokenizer...")
-        new_tokenizer.save_pretrained(f"{configs.base_dir}/tokenizer")
-        info("New tokenizer saved.")
+        if os.path.exists(f"{configs.base_dir}/tokenizer"):
+            info("Loading the pretrained new tokenizer...")
+            tokenizer=AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True)
+            info("New tokenizer loaded.")
+            
+        else:
+            info("Training new Darija tokenizer")
+            train_iterator=batch_iter(dataset["train"])
+            tokenizer=base_tokenizer.train_new_from_iterator(
+                text_iterator=train_iterator,
+                vocab_size=configs.new_vocab_size,
+                show_progress=True
+            )
 
-        info("Load the new Darija tokenizer")
-        new_tokenizer = AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True)
+            info("Saving the new tokenizer...")
+            tokenizer.save_pretrained(f"{configs.base_dir}/tokenizer")
+            info("New tokenizer saved.")
 
-    info("Tokenizing train/test datasets...")
-    train_dataset=dataset["train"].map(
-        lambda example: pre_processing(example,new_tokenizer,configs),
-        batched=True,
-        remove_columns=dataset["train"].column_names
-    )
-    if not ARABIC_TRAIN:
-        test_dataset=dataset["test"].map(
-            lambda example: pre_processing(example,new_tokenizer,configs),
+            info("Load the new Darija tokenizer")
+            tokenizer = AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True)
+            
+        info("Tokenizing train/test datasets...")
+        train_dataset = train_dataset.map(
+            lambda example: pre_processing(example,tokenizer,configs),
             batched=True,
-            remove_columns=dataset["test"].column_names
+            remove_columns=dataset["train"].column_names
+        )
+        if not ARABIC_TRAIN:
+            test_dataset = test_dataset.map(
+                lambda example: pre_processing(example,tokenizer,configs),
+                batched=True,
+                remove_columns=dataset["test"].column_names
+            )
+        
+    else:
+        info(f"[STAGE:{TRAINING_STAGE}]Loading pretrained tokenizer from {configs.base_model_name}...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            configs.base_model_name,
+            use_fast=True
+        )
+    
+        # Initially tokenize with the starting context length
+        info(f"Tokenizing datasets with initial max length {INITIAL_MAX_LENGTH}...")
+        tokenized_train = train_dataset.map(
+            lambda examples: tokenize_function(examples, tokenizer, INITIAL_MAX_LENGTH),
+            batched=True,
+            remove_columns=train_dataset.column_names
+        )
+        
+        tokenized_val = val_dataset.map(
+            lambda examples: tokenize_function(examples, tokenizer, INITIAL_MAX_LENGTH),
+            batched=True,
+            remove_columns=val_dataset.column_names
         )
 
     # info("Counting total tokens in training dataset...")
@@ -128,22 +287,33 @@ if __name__ == "__main__":
 
     info("Initializing data collator...")
     data_collator=DataCollatorForLanguageModeling(
-        tokenizer=new_tokenizer,
+        tokenizer=tokenizer,
         mlm=True,
         mlm_probability=configs.mlm_probability
     )
 
     info("Load base model...")
-    model_config = AutoConfig.from_pretrained(configs.base_model_name)
-    model = AutoModelForMaskedLM.from_pretrained(
-        configs.base_model_name,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        config=model_config
-    ).to(device)
+    if TRAINING_STAGE == 1:
+        model_config = AutoConfig.from_pretrained(configs.base_model_name)
+        model = AutoModelForMaskedLM.from_pretrained(
+            configs.base_model_name,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            config=model_config
+        ).to(device)
 
-    info("Resizing embedding matrix...")
-    model.resize_token_embeddings(configs.new_vocab_size)
+        info("Resizing embedding matrix...")
+        model.resize_token_embeddings(configs.new_vocab_size)
+    
+    elif TRAINING_STAGE == 2:
+        model = AutoModelForMaskedLM.from_pretrained(
+            "BounharAbdelaziz/ModernBERT-Arabic-base-stage-1-pre-decay",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+        ).to(device)
+        
+    # Start with the current model's position embedding size
+    info(f"Initial model position embeddings: {model.config.max_position_embeddings}")
 
     info("init training args...")
     training_args = TrainingArguments(
@@ -163,26 +333,72 @@ if __name__ == "__main__":
         report_to=configs.report_to,
         run_name=configs.run_name,
         gradient_accumulation_steps=configs.gradient_accumulation_steps,
-        lr_scheduler_type="constant_with_warmup", # mimic the trapezoidal schedule, we do decay at the end
+        lr_scheduler_type="constant_with_warmup" if TRAINING_STAGE == 1 else "constant", # mimic the trapezoidal schedule, we do decay at the ending stage
     )
-    info("Done!")
+    
+    if TRAINING_STAGE == 1:
+        info("init trainer...")
+        trainer=Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=test_dataset if not ARABIC_TRAIN else None,
+            data_collator=data_collator
+        )
+        info("Done!")
+    elif TRAINING_STAGE == 2:
+        # Calculate the number of steps for context length
+        N_GPUS = torch.cuda.device_count()
+        total_steps = math.ceil(
+            len(tokenized_train) * configs.num_train_epochs / 
+            (configs.per_device_train_batch_size * configs.gradient_accumulation_steps * N_GPUS)
+        )
+        
+        info(f"Total training steps: {total_steps}")
+        info(f"Context length will increase gradually over {context_lengths_extension_breakpoints} breakpoints from {INITIAL_MAX_LENGTH} to {FINAL_MAX_LENGTH} as follows: {context_lengths_extension_sequence}")
+        
+        # Create a simple namespace to store raw datasets for retokenization
+        class RawDatasets:
+            def __init__(self, train_dataset_raw, val_dataset_raw):
+                self.train_dataset_raw = train_dataset_raw
+                self.val_dataset_raw = val_dataset_raw
+        
+        raw_dataset_args = RawDatasets(train_dataset, val_dataset)
+        
+        info("Initializing custom trainer with gradual context extension...")
+        trainer = GradualContextLengthExtensionTrainer(
+            initial_max_length=INITIAL_MAX_LENGTH,
+            final_max_length=FINAL_MAX_LENGTH,
+            total_steps=total_steps,
+            tokenizer=tokenizer,
+            model=model,
+            args=training_args,
+            train_dataset=tokenized_train,
+            eval_dataset=tokenized_val,
+            data_collator=data_collator,
+            raw_dataset_args=raw_dataset_args,
+            context_lengths_extension_breakpoints=context_lengths_extension_breakpoints,
+            context_lengths_extension_sequence=context_lengths_extension_sequence,
+        )
 
-    info("init trainer...")
-    trainer=Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=test_dataset if not ARABIC_TRAIN else None,
-        data_collator=data_collator
-    )
-    info("Done!")
-
-    info("trainer...")
+    info("Start training...")
+    
+    if TRAINING_STAGE == 1:
+        info(f"Start initial pretraining with context growing from {INITIAL_MAX_LENGTH} to {FINAL_MAX_LENGTH}...")
+        
+    elif TRAINING_STAGE == 2:
+        info(f"Starting training with gradual context extension from {INITIAL_MAX_LENGTH} to {FINAL_MAX_LENGTH}...")
     trainer.train()
-
-    info("save result model...")
+    
+    info("Saving final model...")
+    # Ensure we save with the final extended position embeddings
+    if model.config.max_position_embeddings < FINAL_MAX_LENGTH:
+        model = extend_position_embeddings(model, FINAL_MAX_LENGTH)
+    
     trainer.save_model(configs.output_dir)
-    new_tokenizer.save_pretrained(configs.output_dir)
-    info("push result model to hub...")
-    trainer.push_to_hub(configs.hub_path)
-    info("Done!")
+    tokenizer.save_pretrained(configs.output_dir)
+    
+    info("Pushing model to hub...")
+    trainer.push_to_hub(configs.hub_path, private=True)
+    
+    info("Training completed successfully with gradual context extension!")
