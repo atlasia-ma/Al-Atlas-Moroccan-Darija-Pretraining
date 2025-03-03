@@ -28,13 +28,17 @@ from utils import (
 
 import wandb
 
-TRAINING_STAGE = 2
+TRAINING_STAGE = 3
 # Starting context length
-INITIAL_MAX_LENGTH = 1024
+INITIAL_MAX_LENGTH = 8192 # 1024 8192
 # Target context length
-FINAL_MAX_LENGTH = 8192
-# warmup ratio setps for context length extension
-PERCENTAGE_STEPS_PER_WARMUP = 0.005 
+FINAL_MAX_LENGTH = 8192 # 8192 16384
+# language on which we trained during decay stage
+DECAY_LANG = "MSA"
+# DECAY_LANG = "ARY"
+# DECAY_LANG = "ARZ"
+# DECAY_LANG = "TUNISIAN"
+# DECAY_LANG = "ALGERIAN"
 
 # Define specific breakpoints
 context_lengths_extension_breakpoints = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # 6 breakpoint steps
@@ -88,7 +92,7 @@ if __name__ == "__main__":
             dataset=load_dataset(DATASET_NAME)
             
         train_dataset = dataset["train"]
-        test_dataset = dataset["test"]
+        # test_dataset = dataset["test"]
         
         info("Dataset loaded.")
     
@@ -97,11 +101,12 @@ if __name__ == "__main__":
         # + context extension 
         # + more proba to mask
         configs=Config(
-            hub_path=f"ModernBERT-Arabic-base-stage-2-pre-decay-predef-bkpt",
-            base_dir="./modernbert_ar_101B_base_2",
+            hub_path=f"ModernBERT-Arabic-base-stage-2-pre-decay-predef-bkpt-mx{FINAL_MAX_LENGTH}-r2",
+            base_dir="./modernbert_ar_101B_base",
+            max_length=FINAL_MAX_LENGTH,
             num_train_epochs=1,
-            batch_size=16,
-            gradient_accumulation_steps=16,
+            batch_size=4,
+            gradient_accumulation_steps=64,
             max_grad_norm=1,
             lr=5e-4,
             warmup_ratio=0, # no warmup, just continue
@@ -111,16 +116,6 @@ if __name__ == "__main__":
             save_steps=100,   
             mlm_probability=0.3, # increased difficulty and 0.3 works optimaly for english modernbert
         )
-        
-        # books
-        books_dataset = load_dataset('alielfilali01/Hindawi-Books-dataset', split='train') # ChapterText col
-        # religion
-        quran_tafseer_1_dataset = load_dataset('MohamedRashad/Quran-Tafseer', split='train') # tafsir_content col
-        quran_tafseer_2_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--mustapha--QuranExe', split='train') # text col
-        # general knowlegde
-        arabic_wikipedia_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--Wikipedia', split='train') # text col
-        # reasoning
-        reasoning_dataset = load_dataset('Omartificial-Intelligence-Space/Arabic_Reasoning_Dataset', split='train') # concat 'instruction' + 'answer' col
         
         # Load all datasets with their specific columns of interest
         # Books dataset
@@ -156,7 +151,7 @@ if __name__ == "__main__":
             wikipedia_processed,
             reasoning_processed
         ]) #.select(range(100))
-        info(f"Combined dataset created with {len(combined_dataset)} examples.")
+        info(f"Combined dataset created with {len(combined_dataset)} examples.") # 2,072,271,789 tokens
         
         # Create a small validation split for tracking training progress
         combined_dataset = combined_dataset.train_test_split(test_size=0.01, seed=1998)
@@ -169,36 +164,123 @@ if __name__ == "__main__":
     elif TRAINING_STAGE == 3:
         # decay stage: finetune on a specific language
         configs=Config(
-            data_path="atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset",
-            hub_path="BounharAbdelaziz/Modern-BERT-Morocco-Darija-Base",
-            base_dir="./modernbert_darija_base",
-            num_train_epochs=2,
-            batch_size=16,
-            gradient_accumulation_steps=16,
+            hub_path=f"ModernBERT-Arabic-base-stage-3-decay-mx{FINAL_MAX_LENGTH}-{DECAY_LANG}",
+            base_dir=f"./modernbert_ar_101B_base_decay_{DECAY_LANG}",
+            max_length=FINAL_MAX_LENGTH,
+            num_train_epochs=1,
+            batch_size=16 // 2,
+            gradient_accumulation_steps=16 * 2,
             max_grad_norm=1,
-            lr=1e-6,
-            warmup_ratio=0,
+            lr=5e-4,
+            warmup_ratio=0, # no warmup, decay to 0 instead
             version=f"v1-stage-{TRAINING_STAGE}",
             logging_steps=50,
             eval_steps=100,
-            save_steps=100,        
+            save_steps=100,   
+            mlm_probability=0.3, # 0.3 works optimaly for english modernbert
+            DECAY_LANG=DECAY_LANG,
         )
         
-        # # morocco news in arabic
+        # morocco news in arabic
         # https://huggingface.co/datasets/M-A-D/Mixed-Arabic-Datasets-Repo/viewer/Ara--J-Mourad--MNAD.v1?views%5B%5D=ara__j_mourad__mnadv1 
-        ARABIC_TRAIN = False
         
-        arabic_config = "20231101.ar"
-        DATASET_NAME = configs.data_path
-        print(f'DATASET_NAME: {DATASET_NAME}')
-        print(f'ARABIC_TRAIN: {ARABIC_TRAIN}')
-        print(f'arabic_config: {arabic_config}')
-        print(f'hub_path: {configs.hub_path}')
+        if DECAY_LANG.upper() == "MSA":
         
-        info("Loading dataset...")
-        dataset=load_dataset(DATASET_NAME)
-        info("Dataset loaded.")
-
+            # Reasoning dataset
+            reasoning_dataset = load_dataset('Omartificial-Intelligence-Space/Arabic_Reasoning_Dataset', split='train')
+            reasoning_processed = preprocess_dataset(reasoning_dataset, None, "instruction", "answer") # concat 'instruction' + 'answer' col
+            info("Reasoning dataset loaded and processed.")
+            
+            # Quran tafseer dataset
+            quran_tafseer_2 = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--mustapha--QuranExe', split='train')
+            quran_tafseer_2_processed = preprocess_dataset(quran_tafseer_2, "text") # text col
+            info("Quran tafseer 2 dataset loaded and processed.")
+            
+            # Wikipedia dataset
+            wikipedia_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--Wikipedia', split='train')
+            wikipedia_processed = preprocess_dataset(wikipedia_dataset, "text") # text col
+            info("Wikipedia dataset loaded and processed.")
+            
+            # News dataset
+            news_dataset = load_dataset('M-A-D/Mixed-Arabic-Datasets-Repo', name='Ara--J-Mourad--MNAD.v1', split='train')
+            news_processed = preprocess_dataset(news_dataset, "Body") # text col
+            info("News dataset loaded and processed.")
+            
+            # Combine all datasets into one
+            info("Combining all datasets...")
+            train_dataset = concatenate_datasets([
+                reasoning_processed,
+                quran_tafseer_2_processed,
+                wikipedia_processed,
+                news_processed,
+            ])
+            info(f"Combined dataset created with {len(train_dataset)} examples.") # 545,916,980 tokens
+            
+        elif DECAY_LANG.upper() == "ARY":
+            
+            # Al-Atlas dataset
+            al_atlas_dataset = load_dataset('atlasia/AL-Atlas-Moroccan-Darija-Pretraining-Dataset', split='train')
+            al_atlas_processed = preprocess_dataset(al_atlas_dataset, "text") # text col
+            info("Al-Atlas dataset loaded and processed.")
+            
+            # Combine all datasets into one
+            info("Combining all datasets...")
+            train_dataset = concatenate_datasets([
+                al_atlas_processed,
+            ])
+            
+            info(f"Training dataset created with {len(train_dataset)} examples.") # 273,315,556 tokens
+        
+        elif DECAY_LANG.upper() == "ARZ":
+        
+            # Reasoning dataset
+            mgb3_dataset = load_dataset('MightyStudent/Egyptian-ASR-MGB-3', split='train')
+            mgb3_processed = preprocess_dataset(mgb3_dataset, "sentence") # sentence col
+            info("Reasoning dataset loaded and processed.")
+            
+            # Wikipedia dataset
+            wikipedia_dataset = load_dataset('SaiedAlshahrani/Egyptian_Arabic_Wikipedia_20230101', split='train')
+            wikipedia_processed = preprocess_dataset(wikipedia_dataset, "text") # text col
+            info("Wikipedia dataset loaded and processed.")
+            
+            # Combine all datasets into one
+            info("Combining all datasets...")
+            train_dataset = concatenate_datasets([
+                mgb3_processed,
+                wikipedia_processed,
+            ])
+            info(f"Combined dataset created with {len(train_dataset)} examples.") # XXX tokens
+            
+            
+        elif DECAY_LANG.upper() == "TUNISIAN":
+        
+            # Reasoning dataset
+            stt_dataset = load_dataset('Arbi-Houssem/Tunisian_dataset_STT-TTS15s_filtred1.0', split='train')
+            stt_processed = preprocess_dataset(stt_dataset, "sentence") # sentence col
+            info("Reasoning dataset loaded and processed.")
+            
+            # Combine all datasets into one
+            info("Combining all datasets...")
+            train_dataset = concatenate_datasets([
+                stt_processed,
+            ])
+            info(f"Combined dataset created with {len(train_dataset)} examples.") # XXX tokens
+            
+        elif DECAY_LANG.upper() == "ALGERIAN":
+        
+            # Youtube comments dataset
+            ytb_dataset = load_dataset('ayoubkirouane/Algerian-Darija', split='train')
+            ytb_processed = preprocess_dataset(ytb_dataset, "Text") # sentence col
+            info("Reasoning dataset loaded and processed.")
+            
+            
+            # Combine all datasets into one
+            info("Combining all datasets...")
+            train_dataset = concatenate_datasets([
+                ytb_processed,
+            ])
+            info(f"Combined dataset created with {len(train_dataset)} examples.") # XXX tokens
+            
     # Initialize wandb
     gradual_extension = True if TRAINING_STAGE == 2 else False
     WANDB_CONFIG = {
@@ -223,12 +305,13 @@ if __name__ == "__main__":
         info("Loading base tokenizer...")
         base_tokenizer = AutoTokenizer.from_pretrained(
             configs.base_model_name,
-            use_fast=True
+            use_fast=True,
+            max_length=1024,
         )
 
         if os.path.exists(f"{configs.base_dir}/tokenizer"):
             info("Loading the pretrained new tokenizer...")
-            tokenizer=AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True)
+            tokenizer=AutoTokenizer.from_pretrained(f"{configs.base_dir}/tokenizer",use_fast=True, max_length=1024)
             info("New tokenizer loaded.")
             
         else:
@@ -259,11 +342,12 @@ if __name__ == "__main__":
                 batched=True,
                 remove_columns=dataset["test"].column_names
             )
-        
-    else:
-        info(f"[STAGE:{TRAINING_STAGE}]Loading pretrained tokenizer from {configs.base_model_name}...")
+    
+    elif TRAINING_STAGE == 2:
+    
+        info(f"[STAGE:{TRAINING_STAGE}]Loading pretrained tokenizer from /home/infres/abounhar/AtlasIA/to_my_github/Al-Atlas-Dataset/models/masked_lm/modern_bert/modernbert_arabic_base/tokenizer ...")
         tokenizer = AutoTokenizer.from_pretrained(
-            configs.base_model_name,
+            f"/home/infres/abounhar/AtlasIA/to_my_github/Al-Atlas-Dataset/models/masked_lm/modern_bert/modernbert_arabic_base/tokenizer",
             use_fast=True
         )
     
@@ -281,9 +365,27 @@ if __name__ == "__main__":
             remove_columns=val_dataset.column_names
         )
 
+    elif TRAINING_STAGE == 3:
+    
+        info(f"[STAGE:{TRAINING_STAGE}]Loading pretrained tokenizer from /home/infres/abounhar/AtlasIA/to_my_github/Al-Atlas-Dataset/models/masked_lm/modern_bert/modernbert_arabic_base/tokenizer ...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            f"/home/infres/abounhar/AtlasIA/to_my_github/Al-Atlas-Dataset/models/masked_lm/modern_bert/modernbert_arabic_base/tokenizer",
+            use_fast=True
+        )
+    
+        # Initially tokenize with the starting context length
+        info(f"Tokenizing datasets with initial max length {INITIAL_MAX_LENGTH}...")
+        tokenized_train = train_dataset.map(
+            lambda examples: tokenize_function(examples, tokenizer, INITIAL_MAX_LENGTH),
+            batched=True,
+            remove_columns=train_dataset.column_names
+        )
+        
+
     # info("Counting total tokens in training dataset...")
-    # total_tokens = sum(len(new_tokenizer(example["text"]).input_ids) for example in dataset["train"])
+    # total_tokens = sum(len(tokenizer(example["text"]).input_ids) for example in train_dataset)
     # info(f"Total tokens in training dataset: {total_tokens}")
+    # exit(0)
 
     info("Initializing data collator...")
     data_collator=DataCollatorForLanguageModeling(
@@ -312,9 +414,25 @@ if __name__ == "__main__":
             attn_implementation="flash_attention_2",
         ).to(device)
         
+    elif TRAINING_STAGE == 3:
+        model = AutoModelForMaskedLM.from_pretrained(
+            "BounharAbdelaziz/ModernBERT-Arabic-base-stage-2-pre-decay-ini-1024-mx-8192",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+        ).to(device)
+        
     # Start with the current model's position embedding size
     info(f"Initial model position embeddings: {model.config.max_position_embeddings}")
 
+
+    # mimic the trapezoidal schedule, we do decay at the ending stage
+    if TRAINING_STAGE == 1:
+        lr_scheduler_type = "constant_with_warmup"
+    elif TRAINING_STAGE == 2:
+        lr_scheduler_type = "constant"
+    elif TRAINING_STAGE == 3:
+        lr_scheduler_type = "linear"
+        
     info("init training args...")
     training_args = TrainingArguments(
         output_dir=configs.output_dir,
@@ -333,9 +451,10 @@ if __name__ == "__main__":
         report_to=configs.report_to,
         run_name=configs.run_name,
         gradient_accumulation_steps=configs.gradient_accumulation_steps,
-        lr_scheduler_type="constant_with_warmup" if TRAINING_STAGE == 1 else "constant", # mimic the trapezoidal schedule, we do decay at the ending stage
+        lr_scheduler_type= lr_scheduler_type, # mimic the trapezoidal schedule, we do decay at the ending stage
     )
     
+        
     if TRAINING_STAGE == 1:
         info("init trainer...")
         trainer=Trainer(
@@ -380,6 +499,21 @@ if __name__ == "__main__":
             context_lengths_extension_breakpoints=context_lengths_extension_breakpoints,
             context_lengths_extension_sequence=context_lengths_extension_sequence,
         )
+        
+    elif TRAINING_STAGE == 3:
+        # Calculate the number of steps for context length
+        N_GPUS = torch.cuda.device_count()
+        
+        info(f"Context length will increase gradually over {context_lengths_extension_breakpoints} breakpoints from {INITIAL_MAX_LENGTH} to {FINAL_MAX_LENGTH} as follows: {context_lengths_extension_sequence}")
+        
+        info("Initializing custom trainer with gradual context extension...")
+        trainer = Trainer(
+            tokenizer=tokenizer,
+            model=model,
+            args=training_args,
+            train_dataset=tokenized_train,
+            data_collator=data_collator,
+        )
 
     info("Start training...")
     
@@ -388,6 +522,10 @@ if __name__ == "__main__":
         
     elif TRAINING_STAGE == 2:
         info(f"Starting training with gradual context extension from {INITIAL_MAX_LENGTH} to {FINAL_MAX_LENGTH}...")
+        
+    elif TRAINING_STAGE == 3:
+        info(f"Starting decay stage training with context length set to {FINAL_MAX_LENGTH}...")
+        
     trainer.train()
     
     info("Saving final model...")
@@ -399,6 +537,6 @@ if __name__ == "__main__":
     tokenizer.save_pretrained(configs.output_dir)
     
     info("Pushing model to hub...")
-    trainer.push_to_hub(configs.hub_path, private=True)
+    trainer.push_to_hub(configs.hub_path)
     
     info("Training completed successfully with gradual context extension!")

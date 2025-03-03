@@ -197,6 +197,7 @@ class Config:
     eval_steps=100,
     save_steps=100,
     mlm_probability=0.15,
+    DECAY_LANG="ary",
   ):
     self.base_model_name="answerdotai/ModernBERT-base"
     self.data_path=data_path
@@ -206,12 +207,12 @@ class Config:
     self.mlm_probability=mlm_probability
     
     # build and check run name    
-    self.run_name = f'{self.base_model_name.split("/")[-1]}-bs-{batch_size}-lr-{lr}-ep-{num_train_epochs}-wp-{warmup_ratio}-gacc-{gradient_accumulation_steps}-gnm-{max_grad_norm}-{version}'
+    self.run_name = f'{self.base_model_name.split("/")[-1]}-bs-{batch_size}-lr-{lr}-ep-{num_train_epochs}-wp-{warmup_ratio}-gacc-{gradient_accumulation_steps}-gnm-{max_grad_norm}-{version}-mx-{max_length}-{DECAY_LANG}'
     assert '--' not in self.run_name, f"[WARN] Detected -- in run_name. This will cause a push_to_hub error! Found run_name={self.run_name} "
     assert len(self.run_name) < 96, f"[WARN] run_name too long, found len(run_name)={len(self.run_name)} > 96. This will cause a push_to_hub error! Consider squeezing it. Found run_name={self.run_name}"
     
     self.base_dir=base_dir
-    self.output_dir=self.base_dir+f"/{self.run_name}"
+    self.output_dir=self.base_dir+f"/{self.hub_path}"
     self.num_train_epochs=num_train_epochs
     self.per_device_train_batch_size=batch_size
     self.per_device_eval_batch_size=batch_size
@@ -225,7 +226,6 @@ class Config:
     self.warmup_ratio=warmup_ratio
     self.weight_decay=1e-5
     self.report_to="wandb"
-    self.run_name="al_atlas_masked_lm"
    
     self.wandb_project_name="al_atlas_masked_lm"
     self.overwrite_output_dir = True
