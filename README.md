@@ -1,5 +1,4 @@
-
-# Atlaset Dataset for Moroccan Darija: Collection, Analysis, and Trainings
+# Atlaset Dataset for Moroccan Darija: From Data Collection, Analysis, to Model Trainings
 
 ## TL;DR
 We present a comprehensive dataset for Moroccan darija, addressing the lack of resources for this widely spoken dialect. We detail our collection methodology, provide thorough data analysis, and demonstrate performance improvements in both masked and causal language models after training on this dataset.
@@ -7,7 +6,6 @@ We present a comprehensive dataset for Moroccan darija, addressing the lack of r
 2. Try our [**demo**](https://huggingface.co/spaces/atlasia/Masked-LM-Moroccan-Darija) showcasing our [**Masked Language Model**](https://huggingface.co/atlasia/XLM-RoBERTa-Morocco) for Moroccan darija.
 3. Our [**Atlaset** dataset on Hugging Face](https://huggingface.co/datasets/atlasia/Atlaset).
 4. **Code** is available on [Github](https://github.com/atlasia-ma/Al-Atlas-Moroccan-Darija-Pretraining).
-
 
 ## 1. Challenges in Moroccan Darija
 
@@ -44,17 +42,19 @@ It is worth mentionning that an overlap between datasets have been observed in p
 
 ### Token and Word Metrics
 The dataset shows a diverse range of text lengths. The figures below present the tokens and word count distributions, respectively.
-![token_dist](https://hackmd.io/_uploads/rkiTXh1syx.png)
-![word_count_dist](https://hackmd.io/_uploads/S1oamnyoyg.png)
+![token_dist](img/token_dist.png)
+![word_count_dist](img/word_count_dist.png)
 
 ### Visual Insights
 To get a visual of the most frequent words and sequences of words (n-grams) in the dataset, we provide:
 - **Word Cloud:** A visualization of the most frequent words in the dataset.
-![word_cloud](https://hackmd.io/_uploads/H1o6X3kiJg.png)
+![word_cloud](img/word_cloud.png)
 - **Top k n-grams:** Analysis of the most common n-grams to uncover linguistic patterns.
-![top_k_n_grams](https://hackmd.io/_uploads/ryj6Q21iyx.png)
+![top_k_n_grams](img/top_k_n_grams.png)
 
-While the word cloud and lower-order n-grams (1-grams and 2-grams) effectively illustrate commonly used words in everyday speech, this pattern doesn't continue for higher values of $k > 2$. This discrepancy highlights a limitation in the current version of the dataset and represents an area for ongoing research and improvement.
+The word cloud and lower-order n-grams (1-grams and 2-grams) effectively capture common everyday speech patterns, but this trend breaks down for higher values of k > 2. This inconsistency reveals a limitation in the current dataset version that warrants further investigation and refinement.
+
+Notably, the word cloud identifies 'ديال' (pronounced 'dial') as Atlaset's most frequent term. This predominance stems from its function as a possessive word, typical of function words that dominate natural language frequency distributions across most languages.
 
 
 ### Topic Analysis
@@ -65,9 +65,9 @@ We now dive into a brief exploration of dominant topics across the dataset. We s
 4. We optimized DBSCAN's $\epsilon$ and `min_samples` parameters based on `silhouette_score`.
 5. We plotted the results
 
-*(you can find the code in [our github repo](https://github.com/atlasia-ma/Al-Atlas-Moroccan-Darija-Pretraining))*
+*(you can find the code in [this github repo](https://github.com/atlasia-ma/Al-Atlas-Moroccan-Darija-Pretraining/blob/main/data/embeddings_analysis.ipynb))*
 
-[![cluster](https://hackmd.io/_uploads/S11wFnJs1l.png)](http://www.abdelazizbounhar.com/cluster_1k_eps_0.12_ms_4.html)
+![cluster](img/cluster.png)
 
 <iframe src="http://www.abdelazizbounhar.com/cluster_1k_eps_0.12_ms_4.html" width="100%" height="500px"></iframe>
 
@@ -86,13 +86,25 @@ We selected [FacebookAI/xlm-roberta-large](https://huggingface.co/FacebookAI/xlm
 
 For the fine-tuning process, we used a total batch size of `128` and conducted learning rate optimization, testing values in the range `{1e-4, 5e-5, 1e-5}`. Our experiments revealed that training with a learning rate of 1e-4 yielded the best performances.
 
+<iframe
+	src="https://atlasia-masked-lm-moroccan-darija.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
 ### Causal Language Model (SLM)
 
 For our causal language modeling (Small Language Model) approach, we chose **Qwen2.5** for its superior multilingual capabilities and robust baseline performance ([source](https://huggingface.co/spaces/HuggingFaceFW/blogpost-fine-tasks)). We focused on continual pretraining of the base [Qwen2.5-0.5B](https://huggingface.co/Qwen/Qwen2.5-0.5B) model variant, using the [Atlaset dataset](https://huggingface.co/datasets/atlasia/Atlaset) with a context length of `2048`.
 
 The model was fine-tuned with a total batch size of `128` and a learning rate of `1e-4`, which is generally recognized as an effective learning rate for Qwen2.5 models.
 
-
+<iframe
+	src="https://atlasia-al-atlas-llm.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
 
 ## 5. Evaluation
 
@@ -139,9 +151,22 @@ This project highlights the potential of leveraging a targeted pretraining datas
 
 ## Acknowledgements
 
-Many thanks to the vibrant research community behind Moroccan darija. Special thanks to [Hugging Face](https://huggingface.co/) for sponsoring our community and for providing such a great ecosystem for providing the tools and support necessary to conduct this research.
-
+Many thanks to the vibrant research community behind Moroccan darija. Special thanks to [Nouamane Tazi](https://huggingface.co/nouamanetazi) and [Ali Nirheche](https://huggingface.co/alingwist) for the interesting discussions and to [Hugging Face](https://huggingface.co/) for sponsoring [our community](https://huggingface.co/atlasia) and for building such a great ecosystem that makes this research possible.
 
 ## Join Us
 -	**Website:** https://www.atlasia.ma/
 -	**HuggingFace community:** https://huggingface.co/atlasia
+
+
+## Citation
+
+```
+@article{atlasia2025atlasetblog,
+  title={Atlaset Dataset for Moroccan Darija: From Data Collection, Analysis, to Model Trainings},
+  author={Abdelaziz Bounhar and Abdeljalil El Majjodi},
+  year={2025},
+  journal={Hugging Face Blog},
+  url={https://huggingface.co/blog/atlasia/atlaset-dataset-moroccan-darija},
+  organization={AtlasIA}
+}
+```
