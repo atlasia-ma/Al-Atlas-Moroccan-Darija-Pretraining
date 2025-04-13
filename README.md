@@ -1,4 +1,4 @@
-# Atlaset Dataset for Moroccan Darija: From Data Collection, Analysis, to Model Trainings
+# Al-Atlas: Data, Models, Evals
 
 ## TL;DR
 We present a comprehensive dataset for Moroccan darija, addressing the lack of resources for this widely spoken dialect. We detail our collection methodology, provide thorough data analysis, and demonstrate performance improvements in both masked and causal language models after training on this dataset.
